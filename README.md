@@ -1,5 +1,20 @@
 # img-hosting
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://developers.cloudflare.com/workers/)
+[![Cloudflare R2](https://img.shields.io/badge/Cloudflare-R2-F38020?logo=cloudflare&logoColor=white)](https://developers.cloudflare.com/r2/)
+[![Cloudflare D1](https://img.shields.io/badge/Cloudflare-D1-F38020?logo=cloudflare&logoColor=white)](https://developers.cloudflare.com/d1/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Hono](https://img.shields.io/badge/Hono-4.x-E36002?logo=hono&logoColor=white)](https://hono.dev/)
+[![Wrangler](https://img.shields.io/badge/Wrangler-4.x-F38020?logo=cloudflare&logoColor=white)](https://developers.cloudflare.com/workers/wrangler/)
+[![Vitest](https://img.shields.io/badge/Vitest-2.x-6E9F18?logo=vitest&logoColor=white)](https://vitest.dev/)
+[![pnpm](https://img.shields.io/badge/pnpm-10.x-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
+[![Node](https://img.shields.io/badge/Node-%E2%89%A520-43853D?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Tests](https://img.shields.io/badge/tests-20%20passing-success)](#tests)
+[![API style](https://img.shields.io/badge/API-Imgur--shaped-1BB76E)](https://apidocs.imgur.com/)
+[![Edge runtime](https://img.shields.io/badge/runtime-edge-blueviolet)](https://developers.cloudflare.com/workers/)
+[![Made with Claude Code](https://img.shields.io/badge/Made%20with-Claude%20Code-D97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
+
 A private, self-hosted image host that runs on **Cloudflare Workers** with an
 **Imgur-shaped REST API**. Bring your own API key in `.dev.vars` /
 `wrangler secret`; nothing in this repo contains account-specific IDs.
@@ -118,6 +133,18 @@ By default `link` in API responses uses the request origin (your
 1. Add a route in the Cloudflare dashboard, e.g. `i.example.com/*` → this Worker.
 2. Set `PUBLIC_BASE_URL = "https://i.example.com"` in `wrangler.toml`.
 3. Re-deploy.
+
+## Tests
+
+```bash
+pnpm test         # runs Vitest against @cloudflare/vitest-pool-workers
+pnpm typecheck    # strict tsc --noEmit
+```
+
+20 specs cover upload (raw / multipart / urlencoded / JSON+base64), get,
+list, count, delete, update, serve (incl. `If-None-Match` 304), auth, and
+content-sniff rejection. Tests share an isolated miniflare runtime — no
+Cloudflare account needed.
 
 ## Resizing notes
 

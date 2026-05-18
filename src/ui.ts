@@ -237,9 +237,18 @@ const HTML = `<!doctype html>
   async function discoverIdentity() {
     try {
       const res = await fetch('/whoami', { credentials: 'include' });
-      if (res.ok) {
-        const j = await res.json();
-        if (j.identity?.email) return { kind: 'access', email: j.identity.email };
+      if (!res.ok) return null;
+      const j = await res.json();
+      // Worker wraps payloads in { data, success, status }. Access path:
+      //   data: { kind: 'access', identity: { email, sub } }
+      // Bearer path:
+      //   data: { kind: 'bearer' }
+      const payload = j?.data ?? j;
+      if (payload?.kind === 'access' && payload.identity?.email) {
+        return { kind: 'access', email: payload.identity.email };
+      }
+      if (payload?.kind === 'bearer') {
+        return { kind: 'bearer' };
       }
     } catch (_) {}
     return null;
@@ -344,9 +353,15 @@ const HTML = `<!doctype html>
 
   // Bootstrap
   (async () => {
-    const access = await discoverIdentity();
-    if (access) { showApp(access); return; }
-    if (getKey()) { showApp(null); return; }
+    const identity = await discoverIdentity();
+    if (identity?.kind === 'access') {
+      // Access wins — drop any leftover API-key from a prior session.
+      setKey(null);
+      showApp(identity);
+      return;
+    }
+    if (identity?.kind === 'bearer') { showApp(identity); return; }
+    if (getKey()) { showApp({ kind: 'bearer' }); return; }
     showLogin();
   })();
 })();

@@ -1,0 +1,50 @@
+# =========================================================================
+# img-hosting - Cloudflare Workers config.
+#
+# IMPORTANT: this file is committed to the repo. Do NOT put real account IDs
+# or secrets here. The placeholders below ("REPLACE_..." and the empty
+# `database_id`) are filled in locally by the operator; secrets live in
+# `.dev.vars` (local) and `wrangler secret` (prod).
+# =========================================================================
+
+name = "img-hosting"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Public base URL used to build the `link` field in API responses.
+# Set this to your custom domain once you've added a route, e.g.
+#   PUBLIC_BASE_URL = "https://i.example.com"
+# If unset, links fall back to the request origin (workers.dev URL).
+[vars]
+PUBLIC_BASE_URL = ""
+
+# ---- R2 (image bytes) ----
+# `bucket_name` must match a bucket you've created via
+#   wrangler r2 bucket create <name>
+# Rename if you like; the value is not secret.
+[[r2_buckets]]
+binding = "IMG_BUCKET"
+bucket_name = "img-hosting"
+
+# ---- D1 (metadata) ----
+# Create with:
+#   wrangler d1 create img-hosting
+# Then paste the printed `database_id` here. It's a uuid; not a secret per se,
+# but we still keep it out of the public repo - operators fill it in locally.
+[[d1_databases]]
+binding = "IMG_DB"
+database_name = "img-hosting"
+database_id = ""   # <-- REPLACE with your D1 database_id after `wrangler d1 create`
+migrations_dir = "migrations"
+
+# ---- Rate limiting (unsafe binding; namespace_id is per-Worker, not secret) ----
+[[unsafe.bindings]]
+name = "RL"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 60, period = 60 }   # 60 requests / 60s per key
+
+# ---- Local dev tweaks ----
+[dev]
+port = 8787

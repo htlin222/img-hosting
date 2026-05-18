@@ -17,16 +17,40 @@ API. Single bearer token, single owner (`owner = 'me'`). Optimised for
 | Metadata | D1 (SQLite) | `IMG_DB` |
 | Rate limiting | Cloudflare `ratelimit` (unsafe binding) | `RL` |
 | Image resize | Cloudflare image transformations via `cf.image` | — |
-| Auth | Single bearer token in env | `API_KEY` |
+| Auth (CLI / agents) | Single bearer token in env | `API_KEY` |
+| Auth (Web UI) | Cloudflare Access JWT (Zero Trust) | `ACCESS_TEAM` + `ACCESS_AUD` |
 | Tests | Vitest + `@cloudflare/vitest-pool-workers` | — |
+
+## Three-surface design
+
+The same Worker answers on three hostnames with three auth profiles:
+
+```
+upload-image.example.com   ← Access JWT  (browsers; UI + /3/* + /whoami)
+*.workers.dev /3/*         ← bearer      (CLI / agents)
+*.workers.dev /i/:id.ext   ← none        (public image bytes)
+```
+
+`PUBLIC_BASE_URL` is set to the workers.dev URL on purpose: the `link`
+field in every upload response points at the **public** hostname so
+shared image URLs don't bounce viewers through Access. Don't change
+`PUBLIC_BASE_URL` to the custom domain unless you also add an Access
+**Bypass** policy scoped to `Path: /i/*`.
 
 ## File map
 
 ```
 src/
-  index.ts        Hono root router, mounts sub-apps, error handler.
-  env.ts          `Env` interface (bindings).
-  auth.ts         `requireBearer` middleware (timing-safe compare).
+  index.ts        Hono root router, mounts sub-apps, error handler,
+                  serves /whoami for the UI identity probe.
+  env.ts          `Env` interface (bindings + ACCESS_TEAM/ACCESS_AUD).
+  auth.ts         `requireAuth` (alias `requireBearer` kept for compat):
+                  tries Access JWT first, falls back to API_KEY bearer.
+  access.ts       Verifies Cf-Access-Jwt-Assertion against the team's
+                  JWKS. Caches keys for an hour. Only runs when both
+                  ACCESS_TEAM and ACCESS_AUD are set.
+  ui.ts           Single-page minimalism UI served from `/` for text/html
+                  clients; /3/* JSON listing kept for everything else.
   ids.ts          base62 image id (7 chars) + deletehash (15) + sha256.
   sniff.ts        Magic-byte mime detection + dimension parsing
                   (PNG, JPEG, GIF, WebP). No external dep.

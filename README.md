@@ -18,6 +18,8 @@
 
 > by **[Lin Hsieh-Ting](https://lin.hsiehting.com/about/#en)** · self-hosted, single-key, edge-native image hosting
 
+> 🌐 Language: **English** · [繁體中文](./README.zh-TW.md)
+
 A private, self-hosted image host that runs on **Cloudflare Workers** with an
 **Imgur-shaped REST API**. Bring your own API key in `.dev.vars` /
 `wrangler secret`; nothing in this repo contains account-specific IDs.

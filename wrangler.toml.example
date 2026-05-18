@@ -1,10 +1,10 @@
 # =========================================================================
-# img-hosting - Cloudflare Workers config.
+# img-hosting - Cloudflare Workers config (TEMPLATE).
 #
-# IMPORTANT: this file is committed to the repo. Do NOT put real account IDs
-# or secrets here. The placeholders below ("REPLACE_..." and the empty
-# `database_id`) are filled in locally by the operator; secrets live in
-# `.dev.vars` (local) and `wrangler secret` (prod).
+# 1. Copy this file to `wrangler.toml` (gitignored).
+# 2. Fill in the real `database_id` printed by `wrangler d1 create img-hosting`.
+# 3. Secrets (API_KEY) live in `.dev.vars` locally and `wrangler secret` in
+#    prod - never in this file.
 # =========================================================================
 
 name = "img-hosting"

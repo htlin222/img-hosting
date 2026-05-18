@@ -73,8 +73,9 @@ pnpm wrangler login
 pnpm wrangler r2 bucket create img-hosting
 
 # Create the D1 database. Copy the printed `database_id` into wrangler.toml
-# (the empty `database_id = ""` placeholder).
-pnpm wrangler d1 create img-hosting
+# (which you copy from the committed template):
+cp wrangler.toml.example wrangler.toml      # gitignored — your real IDs go here
+pnpm wrangler d1 create img-hosting         # paste `database_id` into wrangler.toml
 ```
 
 Apply the schema to the remote D1:
@@ -143,7 +144,8 @@ src/
 test/               Vitest + @cloudflare/vitest-pool-workers
 schema.sql          D1 schema (canonical)
 migrations/         Wrangler-managed D1 migrations (mirror of schema.sql)
-wrangler.toml       Worker config (no real IDs committed)
+wrangler.toml.example  Committed template (no real IDs)
+wrangler.toml          Local config with your real database_id (gitignored)
 ```
 
 ## License

@@ -3,6 +3,8 @@ node_modules/
 .dev.vars
 .dev.vars.*
 !.dev.vars.example
+# The real wrangler.toml contains your D1 database_id; only the template is committed.
+wrangler.toml
 dist/
 .DS_Store
 *.log

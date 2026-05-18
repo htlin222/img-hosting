@@ -14,6 +14,9 @@
 [![API style](https://img.shields.io/badge/API-Imgur--shaped-1BB76E)](https://apidocs.imgur.com/)
 [![Edge runtime](https://img.shields.io/badge/runtime-edge-blueviolet)](https://developers.cloudflare.com/workers/)
 [![Made with Claude Code](https://img.shields.io/badge/Made%20with-Claude%20Code-D97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
+[![Author](https://img.shields.io/badge/by-Lin%20Hsieh--Ting-555?logo=githubpages&logoColor=white)](https://lin.hsiehting.com/about/#en)
+
+> by **[Lin Hsieh-Ting](https://lin.hsiehting.com/about/#en)** · self-hosted, single-key, edge-native image hosting
 
 A private, self-hosted image host that runs on **Cloudflare Workers** with an
 **Imgur-shaped REST API**. Bring your own API key in `.dev.vars` /

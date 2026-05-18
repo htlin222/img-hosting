@@ -172,6 +172,50 @@ Cloudflare account needed.
 includes a monthly quota). On `*.workers.dev` URLs transformations don't
 apply and the original bytes are returned.
 
+## Web UI
+
+Visit the root URL in a browser (e.g. `https://img-hosting.<your>.workers.dev/`)
+to get a minimalism uploader: drag-drop or paste an image, the worker writes
+it and the page shows the **URL / Markdown / HTML / deletehash** with one-click
+copy buttons. URL is also auto-copied on successful upload.
+
+The page authenticates one of two ways:
+
+1. **API key** (default, works on `*.workers.dev`) — paste the same key the
+   CLI uses; stored in `sessionStorage` only.
+2. **Cloudflare Access** (recommended for shared use) — see below. Once
+   wired up, the page detects your verified email via `/whoami` and the
+   API-key form is bypassed.
+
+## Cloudflare Access (optional)
+
+Lets you sign in with Google / GitHub / Email-PIN via Cloudflare Zero Trust
+instead of sharing an API key. Free for up to 50 users.
+
+**Prerequisite:** the Worker must be attached to a **custom domain** (Access
+policies cannot bind to `*.workers.dev` subdomains owned by Cloudflare).
+
+1. Add a route in **Workers & Pages → img-hosting → Triggers**, e.g.
+   `i.example.com/*`.
+2. Set `PUBLIC_BASE_URL = "https://i.example.com"` in `wrangler.toml` and
+   redeploy.
+3. In **Zero Trust → Access → Applications → Add an application →
+   Self-hosted**, set the application domain to `i.example.com`, attach
+   your identity providers, and create an allow policy (e.g. *Emails ending
+   in @yourdomain.com*).
+4. From the application overview, copy the **Application Audience (AUD) tag**
+   and your team's `*.cloudflareaccess.com` subdomain.
+5. Set them in `wrangler.toml`:
+   ```toml
+   ACCESS_TEAM = "your-team"
+   ACCESS_AUD  = "abc123…the-aud-uuid"
+   ```
+6. `make deploy`. From now on, every request from a browser is gated by
+   Cloudflare's edge; the Worker verifies the JWT and trusts the email.
+
+The CLI continues to use `Authorization: Bearer $API_KEY` regardless —
+both auth methods coexist, the Worker accepts whichever is present.
+
 ## CLI + Claude skill
 
 The repo ships a self-contained Claude Code skill under [`img-hosting/`](./img-hosting/)

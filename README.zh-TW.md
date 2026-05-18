@@ -168,6 +168,44 @@ list、count、delete、update、serve(含 `If-None-Match` 304)、認證,
 **image transformations**。你必須在 zone 上啟用該功能(免費方案有每月配額)。
 在 `*.workers.dev` 網址上不會生效,會直接回原圖。
 
+## Web UI
+
+直接打開 root URL(例如 `https://img-hosting.<your>.workers.dev/`)
+就能用一個極簡上傳介面:拖放或貼上圖片,上傳後當場顯示
+**URL / Markdown / HTML / deletehash**,每個都有一鍵 copy 按鈕。
+URL 還會自動複製到剪貼簿。
+
+頁面用兩種方式之一認證:
+
+1. **API key**(預設,在 `*.workers.dev` 就能跑)— 貼上跟 CLI 同一把 key,
+   只存在 `sessionStorage`。
+2. **Cloudflare Access**(共用情境建議走這條)— 設定方式如下。
+   設好之後,頁面會透過 `/whoami` 自動辨識你的 email,API key 表單就會被跳過。
+
+## Cloudflare Access(選用)
+
+讓你改用 Google / GitHub / Email PIN 透過 Cloudflare Zero Trust 登入,不用分享 API key。50 個 user 以內免費。
+
+**前提:** Worker 必須掛在**自訂網域**上(Access policy 沒辦法掛在 Cloudflare 自家的 `*.workers.dev` 上)。
+
+1. 在 **Workers & Pages → img-hosting → Triggers** 新增一條 route,例如 `i.example.com/*`。
+2. 在 `wrangler.toml` 設 `PUBLIC_BASE_URL = "https://i.example.com"`,然後重新 deploy。
+3. 在 **Zero Trust → Access → Applications → Add an application → Self-hosted**,
+   把 application domain 設成 `i.example.com`、接上你的 identity provider、建一條 allow policy
+   (例如「Emails ending in @yourdomain.com」)。
+4. 從 application 頁面複製 **Application Audience (AUD) tag** 和你的
+   `*.cloudflareaccess.com` 子網域名稱。
+5. 寫進 `wrangler.toml`:
+   ```toml
+   ACCESS_TEAM = "your-team"
+   ACCESS_AUD  = "abc123…the-aud-uuid"
+   ```
+6. `make deploy`。之後從瀏覽器來的請求會被 Cloudflare 的 edge 攔截檢查,
+   Worker 驗 JWT、信任 email。
+
+CLI 還是繼續用 `Authorization: Bearer $API_KEY`——兩種認證方式並存,
+Worker 接收到誰就用誰。
+
 ## CLI + Claude skill
 
 Repo 內 [`img-hosting/`](./img-hosting/) 是一個自帶的 Claude Code skill,

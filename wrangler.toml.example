@@ -18,6 +18,12 @@ compatibility_flags = ["nodejs_compat"]
 # If unset, links fall back to the request origin (workers.dev URL).
 [vars]
 PUBLIC_BASE_URL = ""
+# Cloudflare Access (Zero Trust). Leave blank to disable Access-based auth;
+# write endpoints will fall back to bearer-token auth in that case.
+#   ACCESS_TEAM = "your-team"                  # the *.cloudflareaccess.com subdomain
+#   ACCESS_AUD  = "<application-AUD-tag-uuid>" # from the Access app you create
+ACCESS_TEAM = ""
+ACCESS_AUD  = ""
 
 # ---- R2 (image bytes) ----
 # `bucket_name` must match a bucket you've created via

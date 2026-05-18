@@ -3,30 +3,39 @@ import type { Env } from './env';
 import { imagesApp } from './images';
 import { accountApp } from './account';
 import { serveApp } from './serve';
-import { fail } from './response';
+import { uiApp } from './ui';
+import { requireAuth } from './auth';
+import { ok, fail } from './response';
+import { verifyAccessJwt } from './access';
 
 const app = new Hono<{ Bindings: Env }>();
 
-app.get('/', (c) =>
-  c.json({
-    name: 'img-hosting',
-    description: 'Imgur-shaped private image host on Cloudflare Workers.',
-    endpoints: [
-      'POST   /3/image',
-      'GET    /3/image/:id',
-      'POST   /3/image/:deletehash      (update title/description)',
-      'DELETE /3/image/:deletehash',
-      'GET    /3/account/me/images',
-      'GET    /3/account/me/images/count',
-      'GET    /3/account/me/image/:id',
-      'GET    /i/:filename              (public image serve)',
-      'GET    /healthz',
-    ],
-  }),
-);
-
 app.get('/healthz', (c) => c.json({ ok: true }));
 
+// Lightweight identity probe used by the UI to find out who you are.
+// - If a valid Access JWT is present, returns the email/sub.
+// - Else if a valid bearer is present, returns { kind: 'bearer' }.
+// - Else returns 401 so the UI can fall back to its API_KEY login form.
+app.get('/whoami', async (c) => {
+  const team = c.env.ACCESS_TEAM;
+  const aud = c.env.ACCESS_AUD;
+  const jwt = c.req.header('Cf-Access-Jwt-Assertion');
+  if (team && aud && jwt) {
+    try {
+      const identity = await verifyAccessJwt(jwt, team, aud);
+      return ok(c, { kind: 'access', identity });
+    } catch (e) {
+      return fail(c, 401, `access jwt invalid: ${(e as Error).message}`);
+    }
+  }
+  // Fall back to bearer. Inline the bearer check here so we can return a
+  // proper 200 with identity on success rather than handing off to next().
+  return requireAuth(c, async () => {
+    c.res = ok(c, { kind: 'bearer' });
+  });
+});
+
+app.route('/', uiApp);
 app.route('/', imagesApp);
 app.route('/', accountApp);
 app.route('/', serveApp);

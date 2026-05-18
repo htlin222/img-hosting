@@ -153,6 +153,40 @@ Cloudflare account needed.
 includes a monthly quota). On `*.workers.dev` URLs transformations don't
 apply and the original bytes are returned.
 
+## CLI + Claude skill
+
+The repo ships a self-contained Claude Code skill under [`img-hosting/`](./img-hosting/)
+with a thin bash CLI that wraps the API. Install it by symlinking:
+
+```bash
+# put the CLI on PATH
+ln -sf "$PWD/img-hosting/bin/img-hosting" ~/bin/img-hosting
+
+# make Claude Code discover the skill
+ln -sfn "$PWD/img-hosting" ~/.claude/skills/img-hosting
+
+# bootstrap config (gitignored)
+cp img-hosting/.env.example img-hosting/.env  # then fill in API_KEY + WORKER_URL
+```
+
+Usage:
+
+```bash
+img-hosting upload screenshot.png
+# https://i.example.com/i/Dwql3jX.png
+
+img-hosting md   screenshot.png            # ![screenshot.png](https://...)
+img-hosting html screenshot.png            # <img src="..." alt="..." />
+img-hosting list --per-page 5              # JSON envelope
+img-hosting delete <deletehash>
+img-hosting whoami                         # masked config dump
+```
+
+When `~/.claude/skills/img-hosting` is in place, Claude Code agents can use
+the skill directly — say "upload this png and give me markdown" and the
+agent will shell out to the CLI and paste the formatted tag back. See
+[`img-hosting/SKILL.md`](./img-hosting/SKILL.md) for the skill manifest.
+
 ## Project layout
 
 ```
@@ -173,6 +207,12 @@ schema.sql          D1 schema (canonical)
 migrations/         Wrangler-managed D1 migrations (mirror of schema.sql)
 wrangler.toml.example  Committed template (no real IDs)
 wrangler.toml          Local config with your real database_id (gitignored)
+
+img-hosting/        Claude Code skill + CLI (`bin/img-hosting`)
+  SKILL.md            Skill manifest read by Claude Code
+  bin/img-hosting     bash CLI (upload | md | html | list | get | delete | whoami)
+  .env.example        Committed template
+  .env                Local config (gitignored)
 ```
 
 ## License

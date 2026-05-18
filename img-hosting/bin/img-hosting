@@ -1,0 +1,205 @@
+#!/usr/bin/env bash
+# img-hosting CLI — upload local images to your private Cloudflare image host
+# and get the hosted URL (or ready-to-paste Markdown / HTML) on stdout.
+#
+# Config: API_KEY + WORKER_URL are read from the first existing source:
+#   1. process env
+#   2. $IMG_HOSTING_ENV file (if set)
+#   3. <this-script>/../.env       (skill-local)
+#   4. ~/.config/img-hosting/.env
+#   5. ./.env                       (cwd)
+#
+# Usage:
+#   img-hosting upload <file> [--title T] [--description D] [--json]
+#   img-hosting md     <file> [--alt TEXT]
+#   img-hosting html   <file> [--alt TEXT]
+#   img-hosting list   [--page N] [--per-page N]
+#   img-hosting count
+#   img-hosting get    <id>
+#   img-hosting delete <deletehash>
+#   img-hosting whoami
+#   img-hosting --help
+#
+# stdin: passing `-` as the file reads bytes from stdin (still needs --ext).
+
+set -euo pipefail
+
+# ---- resolve script dir (portable, follows symlinks) -----------------------
+resolve_dir() {
+  local src=$1
+  while [ -h "$src" ]; do
+    local dir
+    dir=$(cd -P "$(dirname "$src")" >/dev/null 2>&1 && pwd)
+    src=$(readlink "$src")
+    [[ $src != /* ]] && src=$dir/$src
+  done
+  cd -P "$(dirname "$src")" >/dev/null 2>&1 && pwd
+}
+SCRIPT_DIR=$(resolve_dir "${BASH_SOURCE[0]}")
+SKILL_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
+
+# ---- load .env --------------------------------------------------------------
+load_env() {
+  local candidates=(
+    "${IMG_HOSTING_ENV:-}"
+    "$SKILL_DIR/.env"
+    "${XDG_CONFIG_HOME:-$HOME/.config}/img-hosting/.env"
+    "./.env"
+  )
+  for f in "${candidates[@]}"; do
+    if [ -n "$f" ] && [ -f "$f" ]; then
+      # shellcheck disable=SC1090
+      set -a; . "$f"; set +a
+      return
+    fi
+  done
+}
+
+require_config() {
+  if [ -z "${API_KEY:-}" ] || [ -z "${WORKER_URL:-}" ]; then
+    cat >&2 <<EOF
+img-hosting: API_KEY and/or WORKER_URL are not configured.
+
+Place them in one of:
+  $SKILL_DIR/.env
+  ${XDG_CONFIG_HOME:-$HOME/.config}/img-hosting/.env
+  ./.env
+
+Example:
+  API_KEY=...
+  WORKER_URL=https://your-subdomain.workers.dev
+EOF
+    exit 2
+  fi
+}
+
+# ---- helpers ----------------------------------------------------------------
+usage() {
+  sed -n '2,/^set -e/p' "$0" | sed -e '/^set -e/d' -e 's/^# \{0,1\}//'
+}
+
+# extract a JSON string value for a top-level data.<key> — works without jq for
+# the simple shape our API returns. If jq is on PATH, prefer it.
+json_field() {
+  local key=$1 body=$2
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$body" | jq -r ".data.$key // empty"
+  else
+    # naive but adequate for our envelope
+    printf '%s' "$body" | sed -n 's/.*"'"$key"'":"\([^"]*\)".*/\1/p' | head -n1
+  fi
+}
+
+api() {
+  local method=$1 path=$2; shift 2
+  curl -sS --fail-with-body \
+       -X "$method" "$WORKER_URL$path" \
+       -H "Authorization: Bearer $API_KEY" "$@"
+}
+
+post_image() {
+  local file=$1; shift
+  local title="" description=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --title) title=$2; shift 2 ;;
+      --description) description=$2; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  local args=()
+  if [ "$file" = "-" ]; then
+    args+=(-H "Content-Type: application/octet-stream" --data-binary @-)
+  else
+    [ -f "$file" ] || { echo "img-hosting: not a file: $file" >&2; exit 2; }
+    args+=(-F "image=@${file}")
+    [ -n "$title" ] && args+=(-F "title=$title")
+    [ -n "$description" ] && args+=(-F "description=$description")
+  fi
+  api POST /3/image "${args[@]}"
+}
+
+# ---- subcommands ------------------------------------------------------------
+cmd_upload() {
+  local json_only=false file="" rest=()
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --json) json_only=true; shift ;;
+      --title|--description) rest+=("$1" "${2:-}"); shift 2 ;;
+      -h|--help) usage; exit 0 ;;
+      *) file=$1; shift ;;
+    esac
+  done
+  [ -n "$file" ] || { echo "img-hosting upload: missing file" >&2; exit 2; }
+  local resp; resp=$(post_image "$file" "${rest[@]}")
+  if $json_only; then
+    printf '%s\n' "$resp"
+  else
+    json_field link "$resp"
+  fi
+}
+
+cmd_md() {
+  local file=${1:?missing file}; shift || true
+  local alt; alt=$([ "$file" = "-" ] && echo "image" || basename "$file")
+  while [ $# -gt 0 ]; do
+    case $1 in --alt) alt=$2; shift 2 ;; *) shift ;; esac
+  done
+  local link; link=$(json_field link "$(post_image "$file")")
+  [ -n "$link" ] || { echo "img-hosting md: upload failed" >&2; exit 1; }
+  printf '![%s](%s)\n' "$alt" "$link"
+}
+
+cmd_html() {
+  local file=${1:?missing file}; shift || true
+  local alt; alt=$([ "$file" = "-" ] && echo "image" || basename "$file")
+  while [ $# -gt 0 ]; do
+    case $1 in --alt) alt=$2; shift 2 ;; *) shift ;; esac
+  done
+  local link; link=$(json_field link "$(post_image "$file")")
+  [ -n "$link" ] || { echo "img-hosting html: upload failed" >&2; exit 1; }
+  printf '<img src="%s" alt="%s" />\n' "$link" "$alt"
+}
+
+cmd_list() {
+  local page=0 per=50
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --page) page=$2; shift 2 ;;
+      --per-page) per=$2; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  api GET "/3/account/me/images?page=$page&perPage=$per"
+  echo
+}
+
+cmd_count()  { api GET "/3/account/me/images/count"; echo; }
+cmd_get()    { api GET "/3/image/${1:?missing id}"; echo; }
+cmd_delete() { api DELETE "/3/image/${1:?missing deletehash}"; echo; }
+cmd_whoami() {
+  echo "WORKER_URL=$WORKER_URL"
+  echo "API_KEY=${API_KEY:0:8}…(${#API_KEY} chars)"
+  echo "config_source=$SKILL_DIR/.env (or fallback chain)"
+}
+
+# ---- entry ------------------------------------------------------------------
+main() {
+  load_env
+  local cmd=${1:-}
+  shift || true
+  case "$cmd" in
+    upload|up)            require_config; cmd_upload "$@" ;;
+    md|markdown)          require_config; cmd_md "$@" ;;
+    html)                 require_config; cmd_html "$@" ;;
+    list|ls)              require_config; cmd_list "$@" ;;
+    count)                require_config; cmd_count "$@" ;;
+    get|show)             require_config; cmd_get "$@" ;;
+    delete|rm)            require_config; cmd_delete "$@" ;;
+    whoami|env)           require_config; cmd_whoami ;;
+    -h|--help|help|"")    usage ;;
+    *) echo "img-hosting: unknown subcommand: $cmd" >&2; usage >&2; exit 2 ;;
+  esac
+}
+
+main "$@"

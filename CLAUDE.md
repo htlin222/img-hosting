@@ -50,7 +50,15 @@ wrangler.toml.example   Committed template (no real IDs).
 wrangler.toml           Local-only, gitignored, contains real database_id.
 .env / .dev.vars        Local-only, gitignored. Wrangler dev uses .dev.vars.
 .env.example / .dev.vars.example   Committed.
+
+img-hosting/            Claude Code skill + CLI.
+  SKILL.md              Skill manifest.
+  bin/img-hosting       Bash CLI wrapping the API (chmod +x).
+  .env / .env.example   Skill-local config; .env gitignored.
 ```
+
+The CLI is the *only* sanctioned way to call the API from shell / agents.
+Don't add a Node-based CLI in parallel - keep one source of truth.
 
 ## Commands
 

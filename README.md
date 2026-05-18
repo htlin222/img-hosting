@@ -71,10 +71,23 @@ curl -X POST -H "Authorization: Bearer $API_KEY" \
 > custom domain are filled in **locally** during setup. Nothing committed
 > here is specific to any account.
 
+### Quickstart
+
+```bash
+make bootstrap        # pnpm install + create R2 bucket + create D1
+# (paste database_id into wrangler.toml)
+make db-remote        # apply schema to remote D1
+make secret           # paste your API_KEY
+make deploy           # tests + typecheck + wrangler deploy
+make install-all      # symlink CLI to ~/bin + skill to ~/.claude/skills
+```
+
+`make help` lists every target. The longer form below walks through each step.
+
 ### 1. Install
 
 ```bash
-pnpm install
+make install          # or: pnpm install
 ```
 
 ### 2. Cloudflare resources
@@ -137,8 +150,9 @@ By default `link` in API responses uses the request origin (your
 ## Tests
 
 ```bash
-pnpm test         # runs Vitest against @cloudflare/vitest-pool-workers
-pnpm typecheck    # strict tsc --noEmit
+make test         # vitest against @cloudflare/vitest-pool-workers
+make typecheck    # strict tsc --noEmit
+make build        # install + typecheck (wrangler bundles src/ at deploy)
 ```
 
 20 specs cover upload (raw / multipart / urlencoded / JSON+base64), get,
@@ -159,11 +173,7 @@ The repo ships a self-contained Claude Code skill under [`img-hosting/`](./img-h
 with a thin bash CLI that wraps the API. Install it by symlinking:
 
 ```bash
-# put the CLI on PATH
-ln -sf "$PWD/img-hosting/bin/img-hosting" ~/bin/img-hosting
-
-# make Claude Code discover the skill
-ln -sfn "$PWD/img-hosting" ~/.claude/skills/img-hosting
+make install-all      # symlinks CLI -> ~/bin and skill -> ~/.claude/skills
 
 # bootstrap config (gitignored)
 cp img-hosting/.env.example img-hosting/.env  # then fill in API_KEY + WORKER_URL

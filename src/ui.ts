@@ -10,16 +10,19 @@ const HTML = `<!doctype html>
 <style>
   :root {
     --fg: #111;
-    --muted: #888;
-    --line: #e3e3e3;
-    --bg: #fff;
+    --muted: #777;
+    --line: #e6e6e6;
+    --line-strong: #c8c8c8;
+    --bg: #fafafa;
+    --panel: #fff;
     --accent: #111;
     --ok: #16803c;
     --err: #b42318;
+    --shadow: 0 1px 0 rgba(0,0,0,0.02);
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Roboto Mono", monospace;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --fg:#eee; --muted:#888; --line:#2a2a2a; --bg:#0c0c0c; --accent:#eee; --ok:#3ddc84; --err:#ff6b6b; }
+    :root { --fg:#ededed; --muted:#888; --line:#262626; --line-strong:#3a3a3a; --bg:#0a0a0a; --panel:#141414; --accent:#ededed; --ok:#3ddc84; --err:#ff6b6b; --shadow: none; }
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--fg); }
@@ -27,71 +30,119 @@ const HTML = `<!doctype html>
     font-family: var(--mono);
     font-size: 14px;
     line-height: 1.5;
-    padding: 4rem 1.5rem 6rem;
+    padding: 3rem 1.5rem 6rem;
   }
-  main { max-width: 680px; margin: 0 auto; }
-  header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2rem; }
-  header h1 { margin: 0; font-size: 1.05rem; font-weight: 600; letter-spacing: -0.01em; }
-  header .who { color: var(--muted); font-size: 0.85rem; }
+  main { max-width: 720px; margin: 0 auto; }
+  header {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 2.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--line);
+  }
+  header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; letter-spacing: -0.01em; }
+  header .who { color: var(--muted); font-size: 0.8rem; }
   .who a { color: inherit; text-decoration: underline dotted; cursor: pointer; }
+
+  /* Drop zone — the hero element. display: block fixes the inline-label collapse. */
   .drop {
-    border: 1px dashed var(--line);
-    padding: 4rem 1.5rem;
+    display: block;
+    border: 1.5px dashed var(--line-strong);
+    background: var(--panel);
+    padding: 3.5rem 1.5rem;
     text-align: center;
     color: var(--muted);
     cursor: pointer;
-    transition: border-color 0.12s, color 0.12s, background 0.12s;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+    box-shadow: var(--shadow);
   }
-  .drop:hover, .drop.hover { border-color: var(--accent); color: var(--fg); }
-  .drop strong { color: var(--fg); font-weight: 600; }
+  .drop:hover, .drop.hover { border-color: var(--accent); color: var(--fg); background: var(--panel); }
+  .drop .arrow { font-size: 2rem; line-height: 1; display: block; margin-bottom: 0.8rem; color: var(--line-strong); }
+  .drop:hover .arrow, .drop.hover .arrow { color: var(--accent); }
+  .drop .big { color: var(--fg); font-size: 0.95rem; }
+  .drop .big strong { font-weight: 600; }
+  .drop .hint { margin-top: 0.5rem; font-size: 0.75rem; letter-spacing: 0.02em; }
+
   .meta {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 0.75rem;
-    margin-top: 0.75rem;
+    gap: 0.6rem;
+    margin-top: 0.8rem;
   }
   .meta input {
-    font-family: var(--mono);
-    font-size: 13px;
-    padding: 0.55rem 0.7rem;
-    border: 1px solid var(--line);
-    background: var(--bg);
-    color: var(--fg);
+    font-family: var(--mono); font-size: 13px;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--line); background: var(--panel); color: var(--fg);
     width: 100%;
   }
   .meta input:focus { outline: none; border-color: var(--accent); }
-  .status { margin-top: 1rem; min-height: 1.2em; font-size: 0.85rem; color: var(--muted); }
+
+  .status { margin-top: 1.2rem; min-height: 1.4em; font-size: 0.85rem; color: var(--muted); text-align: center; }
   .status.ok { color: var(--ok); }
   .status.err { color: var(--err); }
-  .result { margin-top: 2rem; display: none; }
+
+  .result { margin-top: 2.5rem; display: none; }
   .result.show { display: block; }
-  .result .preview { text-align: center; margin-bottom: 1.5rem; }
-  .result .preview img { max-width: 100%; max-height: 280px; border: 1px solid var(--line); }
-  .row { margin-bottom: 1.25rem; }
-  .row label { display: block; color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.3rem; }
-  .row .field { display: flex; gap: 0.5rem; align-items: stretch; }
+  .preview {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 220px; padding: 1rem;
+    border: 1px solid var(--line); background: var(--panel);
+    margin-bottom: 2rem;
+    background-image: linear-gradient(45deg, var(--line) 25%, transparent 25%),
+                      linear-gradient(-45deg, var(--line) 25%, transparent 25%),
+                      linear-gradient(45deg, transparent 75%, var(--line) 75%),
+                      linear-gradient(-45deg, transparent 75%, var(--line) 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  }
+  .preview img { max-width: 100%; max-height: 360px; display: block; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
+
+  .row { margin-bottom: 1rem; }
+  .row label {
+    display: block; color: var(--muted);
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em;
+    margin-bottom: 0.35rem;
+  }
+  .row .field { display: flex; gap: 0; align-items: stretch; }
   .row code {
-    flex: 1; padding: 0.55rem 0.7rem; border: 1px solid var(--line);
-    background: var(--bg); color: var(--fg); overflow-x: auto;
-    white-space: nowrap; font-family: var(--mono); font-size: 13px;
+    flex: 1; min-width: 0;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid var(--line);
+    background: var(--panel); color: var(--fg);
+    overflow-x: auto; white-space: nowrap;
+    font-family: var(--mono); font-size: 13px;
+    scrollbar-width: thin;
   }
+  .row code::-webkit-scrollbar { height: 4px; }
+  .row code::-webkit-scrollbar-thumb { background: var(--line-strong); }
   button {
-    font-family: var(--mono); font-size: 13px; padding: 0.55rem 0.9rem;
-    border: 1px solid var(--accent); background: var(--bg); color: var(--accent);
+    font-family: var(--mono); font-size: 12px;
+    padding: 0 1rem;
+    border: 1px solid var(--accent); border-left: none;
+    background: var(--panel); color: var(--accent);
     cursor: pointer; white-space: nowrap;
+    transition: background 0.12s, color 0.12s;
   }
-  button:hover { background: var(--accent); color: var(--bg); }
+  button:hover { background: var(--accent); color: var(--panel); }
   button:active { transform: translateY(1px); }
-  button.copied { background: var(--ok); color: var(--bg); border-color: var(--ok); }
+  button.copied { background: var(--ok); color: var(--panel); border-color: var(--ok); }
+
   .login { display: none; }
   .login.show { display: block; }
-  .login form { display: flex; gap: 0.5rem; margin-top: 1rem; }
+  .login p { color: var(--muted); margin: 0; }
+  .login form { display: flex; gap: 0; margin-top: 1rem; }
   .login input {
-    flex: 1; font-family: var(--mono); font-size: 13px; padding: 0.55rem 0.7rem;
-    border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+    flex: 1; min-width: 0;
+    font-family: var(--mono); font-size: 13px;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid var(--line); border-right: none;
+    background: var(--panel); color: var(--fg);
   }
   .login input:focus { outline: none; border-color: var(--accent); }
-  footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.78rem; display: flex; justify-content: space-between; }
+  .login button { border-left: 1px solid var(--accent); }
+
+  footer {
+    margin-top: 5rem; padding-top: 1.5rem; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 0.75rem;
+    display: flex; justify-content: space-between;
+  }
   footer a { color: inherit; }
   input[type=file] { display: none; }
 </style>
@@ -114,8 +165,9 @@ const HTML = `<!doctype html>
   <div id="app" style="display:none">
     <label class="drop" id="drop">
       <input type="file" id="file" accept="image/png,image/jpeg,image/gif,image/webp" />
-      <div>Drop an image here, or <strong>click to choose</strong></div>
-      <div style="margin-top:0.4rem; font-size:0.78rem">PNG · JPEG · GIF · WebP · max 20 MiB</div>
+      <span class="arrow" aria-hidden="true">↑</span>
+      <div class="big">Drop, paste, or <strong>click to choose</strong> an image</div>
+      <div class="hint">PNG · JPEG · GIF · WebP · max 20 MiB</div>
     </label>
     <div class="meta">
       <input id="title" type="text" placeholder="title (optional)" />

@@ -38,17 +38,22 @@ const b64urlToBytes = (s: string): Uint8Array => {
 const decodeJson = <T>(seg: string): T =>
   JSON.parse(new TextDecoder().decode(b64urlToBytes(seg))) as T;
 
-const teamDomain = (team: string): string =>
-  team.startsWith('http')
-    ? team.replace(/\/$/, '')
-    : team.endsWith('.cloudflareaccess.com')
-    ? `https://${team}`
-    : `https://${team}.cloudflareaccess.com`;
+/**
+ * Resolve a team name to the canonical Cloudflare Access origin.
+ * Accepts plain team names (`htlin`), fully-qualified hostnames
+ * (`htlin.cloudflareaccess.com`), or full URLs.
+ */
+export const teamOrigin = (team: string): string => {
+  const trimmed = team.replace(/\/$/, '');
+  if (trimmed.startsWith('http')) return trimmed;
+  if (trimmed.endsWith('.cloudflareaccess.com')) return `https://${trimmed}`;
+  return `https://${trimmed}.cloudflareaccess.com`;
+};
 
 const fetchJwks = async (team: string): Promise<JsonWebKey[]> => {
   const cached = JWKS_CACHE.get(team);
   if (cached && cached.expires > Date.now()) return cached.keys;
-  const url = `${teamDomain(team)}/cdn-cgi/access/certs`;
+  const url = `${teamOrigin(team)}/cdn-cgi/access/certs`;
   const res = await fetch(url, { cf: { cacheTtl: 3600, cacheEverything: true } });
   if (!res.ok) throw new Error(`access: jwks fetch failed ${res.status}`);
   const body = (await res.json()) as { keys: JsonWebKey[] };
@@ -68,24 +73,40 @@ const importRsaKey = (jwk: JsonWebKey): Promise<CryptoKey> =>
 const audMatches = (claim: JwtPayload['aud'], expected: string): boolean =>
   Array.isArray(claim) ? claim.includes(expected) : claim === expected;
 
-export const verifyAccessJwt = async (
+/**
+ * Pure verification: given the JWT, the expected aud, the expected issuer,
+ * and the set of trusted public keys, returns the identity or throws.
+ *
+ * No network calls — testable in isolation. Real callers should use
+ * `verifyAccessJwt`, which resolves the team's JWKS first.
+ */
+export const verifyJwtWithKeys = async (
   jwt: string,
-  team: string,
-  aud: string,
+  expectedAud: string,
+  expectedIss: string,
+  keys: JsonWebKey[],
+  now: number = Date.now(),
 ): Promise<AccessIdentity> => {
   const parts = jwt.split('.');
   if (parts.length !== 3) throw new Error('access: malformed jwt');
   const [hSeg, pSeg, sSeg] = parts;
-  const header = decodeJson<JwtHeader>(hSeg);
-  const payload = decodeJson<JwtPayload>(pSeg);
-  if (header.alg !== 'RS256') throw new Error(`access: unsupported alg ${header.alg}`);
-  if (!payload.exp || payload.exp * 1000 < Date.now())
-    throw new Error('access: jwt expired');
-  if (!audMatches(payload.aud, aud)) throw new Error('access: aud mismatch');
-  if (!payload.iss || !payload.iss.includes(team))
-    throw new Error('access: iss mismatch');
 
-  const keys = await fetchJwks(team);
+  let header: JwtHeader;
+  let payload: JwtPayload;
+  try {
+    header = decodeJson<JwtHeader>(hSeg);
+    payload = decodeJson<JwtPayload>(pSeg);
+  } catch {
+    throw new Error('access: malformed jwt');
+  }
+
+  if (header.alg !== 'RS256') throw new Error(`access: unsupported alg ${header.alg}`);
+  if (!payload.exp || payload.exp * 1000 < now) throw new Error('access: jwt expired');
+  if (!audMatches(payload.aud, expectedAud)) throw new Error('access: aud mismatch');
+  // Strict equality on iss — `.includes()` would allow attacker-controlled
+  // team names that happen to contain the expected substring.
+  if (payload.iss !== expectedIss) throw new Error('access: iss mismatch');
+
   const jwk = keys.find((k) => (k as { kid?: string }).kid === header.kid);
   if (!jwk) throw new Error(`access: no jwk for kid ${header.kid}`);
   const key = await importRsaKey(jwk);
@@ -101,4 +122,23 @@ export const verifyAccessJwt = async (
   if (!ok) throw new Error('access: signature verify failed');
 
   return { email: payload.email ?? '', sub: payload.sub ?? '' };
+};
+
+/**
+ * Verify a Cloudflare Access JWT for the given team / aud. Fetches and
+ * caches the team's JWKS, then delegates to `verifyJwtWithKeys`.
+ */
+export const verifyAccessJwt = async (
+  jwt: string,
+  team: string,
+  aud: string,
+): Promise<AccessIdentity> => {
+  const expectedIss = teamOrigin(team);
+  const keys = await fetchJwks(team);
+  return verifyJwtWithKeys(jwt, aud, expectedIss, keys);
+};
+
+// Test seam: lets tests prime the JWKS cache without going to network.
+export const __setJwksCacheForTests = (team: string, keys: JsonWebKey[]) => {
+  JWKS_CACHE.set(team, { keys, expires: Date.now() + CACHE_TTL_MS });
 };

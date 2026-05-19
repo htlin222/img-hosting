@@ -25,7 +25,9 @@ app.get('/whoami', async (c) => {
       const identity = await verifyAccessJwt(jwt, team, aud);
       return ok(c, { kind: 'access', identity });
     } catch (e) {
-      return fail(c, 401, `access jwt invalid: ${(e as Error).message}`);
+      // Don't leak parser internals to clients; keep details server-side.
+      console.warn('whoami: access jwt invalid:', (e as Error).message);
+      return fail(c, 401, 'unauthorized');
     }
   }
   // Fall back to bearer. Inline the bearer check here so we can return a

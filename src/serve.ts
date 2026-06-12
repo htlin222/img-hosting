@@ -15,6 +15,25 @@ const cacheHeaders = (etag: string): Record<string, string> => ({
   ETag: etag,
 });
 
+// Build the response we return AND, best-effort, stash an independent copy in
+// the edge cache so repeat hits skip the D1 lookup and the R2 read entirely.
+//
+// We deliberately do NOT `res.clone()` a live R2/fetch stream: tee'ing a body
+// whose two branches drain at different rates leaves dangling stream pumps
+// (and stalls the runtime under load). Buffering the bytes once and minting two
+// independent Responses from the same ArrayBuffer sidesteps that entirely. The
+// caller has already read the object size cap (MAX_BYTES) so this is bounded.
+const serveAndCache = (
+  c: { executionCtx: ExecutionContext; req: { raw: Request } },
+  bytes: ArrayBuffer,
+  init: ResponseInit,
+): Response => {
+  c.executionCtx.waitUntil(
+    caches.default.put(c.req.raw, new Response(bytes, init)).catch(() => {}),
+  );
+  return new Response(bytes, init);
+};
+
 export const serveApp = new Hono<{ Bindings: Env }>();
 
 // GET /i/:filename  (e.g. /i/abc1234.jpg)
@@ -24,6 +43,14 @@ serveApp.get('/i/:filename', rateLimit('serve'), async (c) => {
   if (dot < 1) return c.text('not found', 404);
   const id = filename.slice(0, dot);
   const requestedExt = filename.slice(dot + 1).toLowerCase();
+
+  // Serve from the edge cache when possible, skipping D1 + R2. Revalidation
+  // requests (If-None-Match) bypass the cache so the 304 path below still runs.
+  const revalidating = c.req.header('if-none-match');
+  if (!revalidating) {
+    const hit = await caches.default.match(c.req.raw);
+    if (hit) return hit;
+  }
 
   const row = await c.env.IMG_DB.prepare(
     'SELECT id, ext, mime, deleted_at FROM images WHERE id = ? AND deleted_at IS NULL',
@@ -38,19 +65,23 @@ serveApp.get('/i/:filename', rateLimit('serve'), async (c) => {
     // bytes from /raw/<id>.<ext>.
     const url = new URL(c.req.url);
     const origin = c.env.PUBLIC_BASE_URL?.replace(/\/$/, '') || url.origin;
-    return resizeViaCf(origin, `/raw/${id}.${row.ext}`, opts);
+    const resized = await resizeViaCf(origin, `/raw/${id}.${row.ext}`, opts);
+    if (!resized.ok) return resized;
+    return serveAndCache(c, await resized.arrayBuffer(), {
+      status: 200,
+      headers: resized.headers,
+    });
   }
 
   const obj = await c.env.IMG_BUCKET.get(`img/${id}.${row.ext}`);
   if (!obj) return c.text('not found', 404);
 
   const etag = obj.httpEtag;
-  const ifNoneMatch = c.req.header('if-none-match');
-  if (ifNoneMatch && ifNoneMatch === etag) {
+  if (revalidating && revalidating === etag) {
     return new Response(null, { status: 304, headers: cacheHeaders(etag) });
   }
 
-  return new Response(obj.body, {
+  return serveAndCache(c, await obj.arrayBuffer(), {
     status: 200,
     headers: {
       ...cacheHeaders(etag),
@@ -62,12 +93,17 @@ serveApp.get('/i/:filename', rateLimit('serve'), async (c) => {
 
 // GET /raw/:filename - internal endpoint for cf.image resizing to fetch from.
 // Identical bytes to /i/ but bypasses the resize branch to avoid loops.
-serveApp.get('/raw/:filename', async (c) => {
+// It is publicly reachable, so it must carry the same rate limit as /i/ —
+// otherwise it is a free, unmetered bypass of the /i/ serve limit.
+serveApp.get('/raw/:filename', rateLimit('serve'), async (c) => {
   const filename = c.req.param('filename') ?? '';
   const dot = filename.lastIndexOf('.');
   if (dot < 1) return c.text('not found', 404);
   const id = filename.slice(0, dot);
   const requestedExt = filename.slice(dot + 1).toLowerCase();
+
+  const hit = await caches.default.match(c.req.raw);
+  if (hit) return hit;
 
   const row = await c.env.IMG_DB.prepare(
     'SELECT id, ext, mime, deleted_at FROM images WHERE id = ? AND deleted_at IS NULL',
@@ -77,7 +113,7 @@ serveApp.get('/raw/:filename', async (c) => {
   const obj = await c.env.IMG_BUCKET.get(`img/${id}.${row.ext}`);
   if (!obj) return c.text('not found', 404);
 
-  return new Response(obj.body, {
+  return serveAndCache(c, await obj.arrayBuffer(), {
     status: 200,
     headers: {
       ...cacheHeaders(obj.httpEtag),

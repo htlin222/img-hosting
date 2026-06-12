@@ -10,12 +10,16 @@
 
 const JWKS_CACHE = new Map<string, { keys: JsonWebKey[]; expires: number }>();
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+// Tolerance for clock drift between Cloudflare's edge and this Worker when
+// evaluating the `exp` / `nbf` time claims.
+const CLOCK_SKEW_MS = 60 * 1000; // 60 seconds
 
 type JwtHeader = { alg: string; kid: string; typ?: string };
 type JwtPayload = {
   aud?: string | string[];
   iss?: string;
   exp?: number;
+  nbf?: number;
   email?: string;
   identity_nonce?: string;
   sub?: string;
@@ -50,9 +54,9 @@ export const teamOrigin = (team: string): string => {
   return `https://${trimmed}.cloudflareaccess.com`;
 };
 
-const fetchJwks = async (team: string): Promise<JsonWebKey[]> => {
+const fetchJwks = async (team: string, force = false): Promise<JsonWebKey[]> => {
   const cached = JWKS_CACHE.get(team);
-  if (cached && cached.expires > Date.now()) return cached.keys;
+  if (!force && cached && cached.expires > Date.now()) return cached.keys;
   const url = `${teamOrigin(team)}/cdn-cgi/access/certs`;
   const res = await fetch(url, { cf: { cacheTtl: 3600, cacheEverything: true } });
   if (!res.ok) throw new Error(`access: jwks fetch failed ${res.status}`);
@@ -101,7 +105,13 @@ export const verifyJwtWithKeys = async (
   }
 
   if (header.alg !== 'RS256') throw new Error(`access: unsupported alg ${header.alg}`);
-  if (!payload.exp || payload.exp * 1000 < now) throw new Error('access: jwt expired');
+  // Allow a small clock skew on both ends of the validity window.
+  if (!payload.exp || payload.exp * 1000 < now - CLOCK_SKEW_MS) {
+    throw new Error('access: jwt expired');
+  }
+  if (payload.nbf && payload.nbf * 1000 > now + CLOCK_SKEW_MS) {
+    throw new Error('access: jwt not yet valid');
+  }
   if (!audMatches(payload.aud, expectedAud)) throw new Error('access: aud mismatch');
   // Strict equality on iss — `.includes()` would allow attacker-controlled
   // team names that happen to contain the expected substring.
@@ -135,7 +145,19 @@ export const verifyAccessJwt = async (
 ): Promise<AccessIdentity> => {
   const expectedIss = teamOrigin(team);
   const keys = await fetchJwks(team);
-  return verifyJwtWithKeys(jwt, aud, expectedIss, keys);
+  try {
+    return await verifyJwtWithKeys(jwt, aud, expectedIss, keys);
+  } catch (e) {
+    // When Access rotates signing keys, a token's `kid` won't be in our cached
+    // JWKS and every request fails until the 1h TTL lapses — effectively
+    // locking the user out. On a kid miss specifically, force a single refresh
+    // and retry. Other failures (expired, bad sig, aud/iss) are not retried.
+    if ((e as Error).message.includes('no jwk for kid')) {
+      const fresh = await fetchJwks(team, true);
+      return verifyJwtWithKeys(jwt, aud, expectedIss, fresh);
+    }
+    throw e;
+  }
 };
 
 // Test seam: lets tests prime the JWKS cache without going to network.

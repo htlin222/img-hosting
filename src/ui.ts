@@ -257,13 +257,15 @@ const HTML = `<!doctype html>
   function showApp(identity) {
     login.classList.remove('show');
     app.style.display = '';
-    if (identity?.kind === 'access') {
-      who.innerHTML = identity.email + ' · <a id="signout">sign out</a>';
-    } else {
-      who.innerHTML = 'bearer · <a id="signout">sign out</a>';
-    }
-    const so = document.getElementById('signout');
-    so?.addEventListener('click', () => { setKey(null); location.reload(); });
+    // Build via DOM, never innerHTML: the email comes from the Access JWT and
+    // must not be interpreted as markup (defense-in-depth against XSS).
+    who.textContent = identity?.kind === 'access' ? identity.email : 'bearer';
+    who.appendChild(document.createTextNode(' · '));
+    const so = document.createElement('a');
+    so.id = 'signout';
+    so.textContent = 'sign out';
+    so.addEventListener('click', () => { setKey(null); location.reload(); });
+    who.appendChild(so);
   }
 
   function showLogin() {
@@ -377,7 +379,22 @@ uiApp.get('/', (c) => {
   // Browsers send `text/html`; CLI / curl typically send `*/*` or no header.
   // Serve the UI for HTML clients; keep the JSON endpoint listing for the rest.
   if (accept.includes('text/html')) {
-    return c.html(HTML);
+    // The UI is a single self-contained page with one inline <script>/<style>,
+    // so script/style-src need 'unsafe-inline'. Everything else is locked down:
+    // network calls stay same-origin, framing is denied, and previews load
+    // image bytes from the public host (img-src https:).
+    return c.html(HTML, 200, {
+      'Content-Security-Policy': [
+        "default-src 'self'",
+        "img-src 'self' https: data:",
+        "style-src 'self' 'unsafe-inline'",
+        "script-src 'self' 'unsafe-inline'",
+        "connect-src 'self'",
+        "base-uri 'none'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+      ].join('; '),
+    });
   }
   return c.json({
     name: 'img-hosting',

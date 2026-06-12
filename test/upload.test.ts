@@ -93,4 +93,22 @@ describe('POST /3/image', () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it('dedups identical bytes to the same object (content hash)', async () => {
+    const bytes = tinyPng();
+    const post = () =>
+      SELF.fetch('https://example.test/3/image', {
+        method: 'POST',
+        headers: { ...AUTH, 'Content-Type': 'image/png' },
+        body: bytes,
+      });
+    const a = (await (await post()).json()) as { data: { id: string } };
+    const b = (await (await post()).json()) as { data: { id: string } };
+    expect(b.data.id).toBe(a.data.id);
+
+    const count = await SELF.fetch('https://example.test/3/account/me/images/count', {
+      headers: AUTH,
+    });
+    expect(((await count.json()) as { data: number }).data).toBe(1);
+  });
 });

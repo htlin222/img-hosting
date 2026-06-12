@@ -5,10 +5,20 @@ import { accountApp } from './account';
 import { serveApp } from './serve';
 import { uiApp } from './ui';
 import { requireAuth } from './auth';
+import { rateLimit } from './ratelimit';
 import { ok, fail } from './response';
 import { verifyAccessJwt } from './access';
 
 const app = new Hono<{ Bindings: Env }>();
+
+// Baseline hardening headers on every response. `nosniff` stops content-type
+// sniffing (matters for the public image bytes and any error JSON); the CSP for
+// the HTML UI is set in ui.ts where the policy can be page-specific.
+app.use('*', async (c, next) => {
+  await next();
+  c.header('X-Content-Type-Options', 'nosniff');
+  c.header('Referrer-Policy', 'no-referrer');
+});
 
 app.get('/healthz', (c) => c.json({ ok: true }));
 
@@ -16,7 +26,7 @@ app.get('/healthz', (c) => c.json({ ok: true }));
 // - If a valid Access JWT is present, returns the email/sub.
 // - Else if a valid bearer is present, returns { kind: 'bearer' }.
 // - Else returns 401 so the UI can fall back to its API_KEY login form.
-app.get('/whoami', async (c) => {
+app.get('/whoami', rateLimit('read'), async (c) => {
   const team = c.env.ACCESS_TEAM;
   const aud = c.env.ACCESS_AUD;
   const jwt = c.req.header('Cf-Access-Jwt-Assertion');

@@ -1,15 +1,17 @@
 import { SELF } from 'cloudflare:test';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
-import { applySchema, resetState, tinyPng, AUTH } from './helpers';
+import { applySchema, resetState, distinctPng, AUTH } from './helpers';
 
 beforeAll(applySchema);
 beforeEach(resetState);
 
+// Distinct bytes per upload so each becomes its own row (content dedup would
+// otherwise collapse identical uploads into one).
 const upload = async () => {
   const res = await SELF.fetch('https://example.test/3/image', {
     method: 'POST',
     headers: { ...AUTH, 'Content-Type': 'image/png' },
-    body: tinyPng(),
+    body: distinctPng(),
   });
   return ((await res.json()) as { data: { id: string } }).data;
 };

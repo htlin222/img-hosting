@@ -7,7 +7,11 @@
 #   2. $IMG_HOSTING_ENV file (if set)
 #   3. <this-script>/../.env       (skill-local)
 #   4. ~/.config/img-hosting/.env
-#   5. ./.env                       (cwd)
+#
+# NOTE: a `./.env` in the current directory is intentionally NOT sourced.
+# `load_env` runs `. "$f"` (with `set -a`), which executes the file as shell;
+# auto-sourcing a cwd file means cd-ing into any untrusted directory could run
+# arbitrary code. Point IMG_HOSTING_ENV at a cwd file explicitly if you want it.
 #
 # Usage:
 #   img-hosting upload <file> [--title T] [--description D] [--json]
@@ -40,11 +44,12 @@ SKILL_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
 
 # ---- load .env --------------------------------------------------------------
 load_env() {
+  # Deliberately excludes "./.env": sourcing a cwd-relative file would run
+  # arbitrary shell from whatever directory the CLI happens to be invoked in.
   local candidates=(
     "${IMG_HOSTING_ENV:-}"
     "$SKILL_DIR/.env"
     "${XDG_CONFIG_HOME:-$HOME/.config}/img-hosting/.env"
-    "./.env"
   )
   for f in "${candidates[@]}"; do
     if [ -n "$f" ] && [ -f "$f" ]; then
@@ -63,7 +68,7 @@ img-hosting: API_KEY and/or WORKER_URL are not configured.
 Place them in one of:
   $SKILL_DIR/.env
   ${XDG_CONFIG_HOME:-$HOME/.config}/img-hosting/.env
-  ./.env
+  (or point IMG_HOSTING_ENV at an explicit file)
 
 Example:
   API_KEY=...

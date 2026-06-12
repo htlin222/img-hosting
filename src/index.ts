@@ -11,6 +11,15 @@ import { verifyAccessJwt } from './access';
 
 const app = new Hono<{ Bindings: Env }>();
 
+// Baseline hardening headers on every response. `nosniff` stops content-type
+// sniffing (matters for the public image bytes and any error JSON); the CSP for
+// the HTML UI is set in ui.ts where the policy can be page-specific.
+app.use('*', async (c, next) => {
+  await next();
+  c.header('X-Content-Type-Options', 'nosniff');
+  c.header('Referrer-Policy', 'no-referrer');
+});
+
 app.get('/healthz', (c) => c.json({ ok: true }));
 
 // Lightweight identity probe used by the UI to find out who you are.

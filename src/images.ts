@@ -7,7 +7,13 @@ import { newImageId, newDeleteHash, sha256Hex } from './ids';
 import { sniffImage } from './sniff';
 
 const MAX_BYTES = 20 * 1024 * 1024; // 20 MiB, matches Imgur free tier-ish cap
+// base64 encodes 3 bytes per 4 chars (~33% overhead); plus slack for an
+// optional data-URL prefix. Used to reject oversize payloads *before* atob
+// allocates the decoded buffer into memory.
+export const MAX_B64_CHARS = Math.ceil((MAX_BYTES * 4) / 3) + 256;
 const OWNER = 'me';
+
+type BodyError = { error: string; status?: number };
 
 type ImageRow = {
   id: string;
@@ -44,7 +50,7 @@ const toImgurShape = (row: ImageRow, c: { env: Env; req: { url: string } }, incl
   ...(includeDeleteHash ? { deletehash: row.deletehash } : {}),
 });
 
-const readBody = async (req: Request): Promise<{ bytes: Uint8Array; filename: string | null; title: string | null; description: string | null } | { error: string }> => {
+const readBody = async (req: Request): Promise<{ bytes: Uint8Array; filename: string | null; title: string | null; description: string | null } | BodyError> => {
   const contentType = req.headers.get('content-type') ?? '';
   // multipart
   if (contentType.startsWith('multipart/form-data')) {
@@ -53,12 +59,14 @@ const readBody = async (req: Request): Promise<{ bytes: Uint8Array; filename: st
     let bytes: Uint8Array;
     let filename: string | null = null;
     if (image instanceof File) {
-      if (image.size > MAX_BYTES) return { error: 'file too large' };
+      if (image.size > MAX_BYTES) return { error: 'file too large', status: 413 };
       bytes = new Uint8Array(await image.arrayBuffer());
       filename = image.name || null;
     } else if (typeof image === 'string') {
       // base64 in multipart field
-      bytes = decodeBase64(image);
+      const decoded = decodeBase64(image);
+      if ('error' in decoded) return decoded;
+      bytes = decoded;
     } else {
       return { error: 'missing `image` field' };
     }
@@ -76,7 +84,14 @@ const readBody = async (req: Request): Promise<{ bytes: Uint8Array; filename: st
     const image = form.get('image');
     if (!image) return { error: 'missing `image` field' };
     const isBase64 = (form.get('type') ?? '').toLowerCase() === 'base64';
-    const bytes = isBase64 ? decodeBase64(image) : new TextEncoder().encode(image);
+    let bytes: Uint8Array;
+    if (isBase64) {
+      const decoded = decodeBase64(image);
+      if ('error' in decoded) return decoded;
+      bytes = decoded;
+    } else {
+      bytes = new TextEncoder().encode(image);
+    }
     return {
       bytes,
       filename: form.get('name'),
@@ -86,11 +101,21 @@ const readBody = async (req: Request): Promise<{ bytes: Uint8Array; filename: st
   }
   // application/json with base64
   if (contentType.startsWith('application/json')) {
-    const body = (await req.json()) as { image?: string; type?: string; name?: string; title?: string; description?: string };
+    let body: { image?: string; type?: string; name?: string; title?: string; description?: string };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return { error: 'invalid JSON body' };
+    }
     if (!body.image) return { error: 'missing `image` field' };
-    const bytes = (body.type ?? 'base64').toLowerCase() === 'base64'
-      ? decodeBase64(body.image)
-      : new TextEncoder().encode(body.image);
+    let bytes: Uint8Array;
+    if ((body.type ?? 'base64').toLowerCase() === 'base64') {
+      const decoded = decodeBase64(body.image);
+      if ('error' in decoded) return decoded;
+      bytes = decoded;
+    } else {
+      bytes = new TextEncoder().encode(body.image);
+    }
     return {
       bytes,
       filename: body.name ?? null,
@@ -101,14 +126,22 @@ const readBody = async (req: Request): Promise<{ bytes: Uint8Array; filename: st
   // raw bytes
   const buf = await req.arrayBuffer();
   if (buf.byteLength === 0) return { error: 'empty body' };
-  if (buf.byteLength > MAX_BYTES) return { error: 'file too large' };
+  if (buf.byteLength > MAX_BYTES) return { error: 'file too large', status: 413 };
   return { bytes: new Uint8Array(buf), filename: null, title: null, description: null };
 };
 
-const decodeBase64 = (s: string): Uint8Array => {
+const decodeBase64 = (s: string): Uint8Array | BodyError => {
   // Strip data URL prefix if present.
-  const clean = s.includes(',') ? s.slice(s.indexOf(',') + 1) : s;
-  const binary = atob(clean.replace(/\s+/g, ''));
+  const clean = (s.includes(',') ? s.slice(s.indexOf(',') + 1) : s).replace(/\s+/g, '');
+  // Reject before allocating: atob would expand `clean` into a buffer ~3/4 its
+  // length, so an oversize string is a memory-pressure vector. Bound the input.
+  if (clean.length > MAX_B64_CHARS) return { error: 'file too large', status: 413 };
+  let binary: string;
+  try {
+    binary = atob(clean);
+  } catch {
+    return { error: 'invalid base64 image' };
+  }
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
   return out;
@@ -119,7 +152,7 @@ export const imagesApp = new Hono<{ Bindings: Env }>();
 // ----- POST /3/image -----
 imagesApp.post('/3/image', rateLimit('upload'), requireBearer, async (c) => {
   const parsed = await readBody(c.req.raw);
-  if ('error' in parsed) return fail(c, 400, parsed.error);
+  if ('error' in parsed) return fail(c, parsed.status ?? 400, parsed.error);
   const { bytes, filename, title, description } = parsed;
   if (bytes.byteLength === 0) return fail(c, 400, 'empty image');
   if (bytes.byteLength > MAX_BYTES) return fail(c, 413, 'file too large');
@@ -182,6 +215,24 @@ imagesApp.delete('/3/image/:deletehash', rateLimit('write'), requireBearer, asyn
   await c.env.IMG_DB.prepare('UPDATE images SET deleted_at = ? WHERE id = ?')
     .bind(now, row.id).run();
   await c.env.IMG_BUCKET.delete(`img/${row.id}.${row.ext}`).catch(() => {});
+
+  // Best-effort purge of the edge-cached canonical bytes so a delete takes
+  // effect promptly. We can only purge URLs we can name: the public base and
+  // the request origin, for both /i/ and /raw/. Resized variants (with query
+  // strings) are not enumerable here and age out via their immutable TTL —
+  // consistent with the existing "immutable, max-age=1y" contract on /i/.
+  const origins = new Set(
+    [c.env.PUBLIC_BASE_URL?.replace(/\/$/, ''), new URL(c.req.url).origin].filter(
+      (o): o is string => Boolean(o),
+    ),
+  );
+  for (const origin of origins) {
+    for (const prefix of ['/i/', '/raw/']) {
+      c.executionCtx.waitUntil(
+        caches.default.delete(`${origin}${prefix}${row.id}.${row.ext}`).catch(() => {}),
+      );
+    }
+  }
   return ok(c, true);
 });
 

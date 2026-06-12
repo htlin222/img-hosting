@@ -50,9 +50,9 @@ export const teamOrigin = (team: string): string => {
   return `https://${trimmed}.cloudflareaccess.com`;
 };
 
-const fetchJwks = async (team: string): Promise<JsonWebKey[]> => {
+const fetchJwks = async (team: string, force = false): Promise<JsonWebKey[]> => {
   const cached = JWKS_CACHE.get(team);
-  if (cached && cached.expires > Date.now()) return cached.keys;
+  if (!force && cached && cached.expires > Date.now()) return cached.keys;
   const url = `${teamOrigin(team)}/cdn-cgi/access/certs`;
   const res = await fetch(url, { cf: { cacheTtl: 3600, cacheEverything: true } });
   if (!res.ok) throw new Error(`access: jwks fetch failed ${res.status}`);
@@ -135,7 +135,19 @@ export const verifyAccessJwt = async (
 ): Promise<AccessIdentity> => {
   const expectedIss = teamOrigin(team);
   const keys = await fetchJwks(team);
-  return verifyJwtWithKeys(jwt, aud, expectedIss, keys);
+  try {
+    return await verifyJwtWithKeys(jwt, aud, expectedIss, keys);
+  } catch (e) {
+    // When Access rotates signing keys, a token's `kid` won't be in our cached
+    // JWKS and every request fails until the 1h TTL lapses — effectively
+    // locking the user out. On a kid miss specifically, force a single refresh
+    // and retry. Other failures (expired, bad sig, aud/iss) are not retried.
+    if ((e as Error).message.includes('no jwk for kid')) {
+      const fresh = await fetchJwks(team, true);
+      return verifyJwtWithKeys(jwt, aud, expectedIss, fresh);
+    }
+    throw e;
+  }
 };
 
 // Test seam: lets tests prime the JWKS cache without going to network.

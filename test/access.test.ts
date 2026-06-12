@@ -1,5 +1,10 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import { verifyJwtWithKeys, teamOrigin } from '../src/access';
+import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
+import {
+  verifyJwtWithKeys,
+  verifyAccessJwt,
+  teamOrigin,
+  __setJwksCacheForTests,
+} from '../src/access';
 
 // We sign a real RS256 JWT with a generated keypair, then feed both
 // the JWT and the matching public JWK into verifyJwtWithKeys to exercise
@@ -180,6 +185,61 @@ describe('verifyJwtWithKeys', () => {
     await expect(
       verifyJwtWithKeys(tampered, EXPECTED_AUD, EXPECTED_ISS, [publicJwk]),
     ).rejects.toThrow(/signature verify failed/);
+  });
+});
+
+describe('verifyAccessJwt JWKS rotation (P2)', () => {
+  const TEAM2 = 'rotationteam';
+  const ISS2 = teamOrigin(TEAM2);
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  const exportPublic = async (kp: CryptoKeyPair, kid: string): Promise<JsonWebKey> => {
+    const jwk = (await crypto.subtle.exportKey('jwk', kp.publicKey)) as JsonWebKey & { kid: string };
+    jwk.kid = kid;
+    return jwk;
+  };
+
+  it('refetches JWKS when the token kid is missing from cache (key rotation)', async () => {
+    // Cache holds only the *old* signing key — the lockout scenario.
+    const oldKp = await generateRsaKeypair();
+    __setJwksCacheForTests(TEAM2, [await exportPublic(oldKp, 'old-kid')]);
+
+    // The token is signed by a freshly-rotated key the cache hasn't seen.
+    const newKp = await generateRsaKeypair();
+    const newJwk = await exportPublic(newKp, 'new-kid');
+    const jwt = await signJwt(validClaims({ iss: ISS2 }), {
+      kid: 'new-kid',
+      signer: newKp.privateKey,
+    });
+
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ keys: [newJwk] }), {
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const identity = await verifyAccessJwt(jwt, TEAM2, EXPECTED_AUD);
+    expect(identity.email).toBe('user@example.com');
+    // Exactly one forced refresh — not a refetch storm.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT refetch for an ordinarily-invalid token (e.g. expired)', async () => {
+    const kp = await generateRsaKeypair();
+    __setJwksCacheForTests(TEAM2, [await exportPublic(kp, 'k1')]);
+    const jwt = await signJwt(
+      validClaims({ iss: ISS2, exp: Math.floor(Date.now() / 1000) - 30 }),
+      { kid: 'k1', signer: kp.privateKey },
+    );
+
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(verifyAccessJwt(jwt, TEAM2, EXPECTED_AUD)).rejects.toThrow(/expired/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

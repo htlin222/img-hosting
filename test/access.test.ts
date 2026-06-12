@@ -26,6 +26,7 @@ type Claims = {
   aud?: string | string[];
   iss?: string;
   exp?: number;
+  nbf?: number;
   email?: string;
   sub?: string;
 };
@@ -113,6 +114,21 @@ describe('verifyJwtWithKeys', () => {
     await expect(
       verifyJwtWithKeys(jwt, EXPECTED_AUD, EXPECTED_ISS, [publicJwk]),
     ).rejects.toThrow(/expired/);
+  });
+
+  it('rejects a not-yet-valid token (nbf well in the future)', async () => {
+    const jwt = await signJwt(validClaims({ nbf: Math.floor(Date.now() / 1000) + 3600 }));
+    await expect(
+      verifyJwtWithKeys(jwt, EXPECTED_AUD, EXPECTED_ISS, [publicJwk]),
+    ).rejects.toThrow(/not yet valid/);
+  });
+
+  it('tolerates small clock skew on nbf and exp', async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    // nbf 30s ahead and exp 30s past — both inside the 60s skew window.
+    const jwt = await signJwt(validClaims({ nbf: nowSec + 30, exp: nowSec - 30 }));
+    const identity = await verifyJwtWithKeys(jwt, EXPECTED_AUD, EXPECTED_ISS, [publicJwk]);
+    expect(identity.email).toBe('user@example.com');
   });
 
   it('rejects wrong aud', async () => {
@@ -230,8 +246,9 @@ describe('verifyAccessJwt JWKS rotation (P2)', () => {
   it('does NOT refetch for an ordinarily-invalid token (e.g. expired)', async () => {
     const kp = await generateRsaKeypair();
     __setJwksCacheForTests(TEAM2, [await exportPublic(kp, 'k1')]);
+    // Well past the 60s clock-skew tolerance so it is unambiguously expired.
     const jwt = await signJwt(
-      validClaims({ iss: ISS2, exp: Math.floor(Date.now() / 1000) - 30 }),
+      validClaims({ iss: ISS2, exp: Math.floor(Date.now() / 1000) - 300 }),
       { kid: 'k1', signer: kp.privateKey },
     );
 

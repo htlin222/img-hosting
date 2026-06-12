@@ -10,12 +10,16 @@
 
 const JWKS_CACHE = new Map<string, { keys: JsonWebKey[]; expires: number }>();
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+// Tolerance for clock drift between Cloudflare's edge and this Worker when
+// evaluating the `exp` / `nbf` time claims.
+const CLOCK_SKEW_MS = 60 * 1000; // 60 seconds
 
 type JwtHeader = { alg: string; kid: string; typ?: string };
 type JwtPayload = {
   aud?: string | string[];
   iss?: string;
   exp?: number;
+  nbf?: number;
   email?: string;
   identity_nonce?: string;
   sub?: string;
@@ -101,7 +105,13 @@ export const verifyJwtWithKeys = async (
   }
 
   if (header.alg !== 'RS256') throw new Error(`access: unsupported alg ${header.alg}`);
-  if (!payload.exp || payload.exp * 1000 < now) throw new Error('access: jwt expired');
+  // Allow a small clock skew on both ends of the validity window.
+  if (!payload.exp || payload.exp * 1000 < now - CLOCK_SKEW_MS) {
+    throw new Error('access: jwt expired');
+  }
+  if (payload.nbf && payload.nbf * 1000 > now + CLOCK_SKEW_MS) {
+    throw new Error('access: jwt not yet valid');
+  }
   if (!audMatches(payload.aud, expectedAud)) throw new Error('access: aud mismatch');
   // Strict equality on iss — `.includes()` would allow attacker-controlled
   // team names that happen to contain the expected substring.

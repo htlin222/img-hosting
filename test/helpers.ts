@@ -50,4 +50,16 @@ export const tinyPng = (): Uint8Array => {
   return out;
 };
 
+// A PNG with `count` extra trailing bytes appended so each call yields a
+// distinct sha256 (defeating upload dedup) while staying sniffable — sniff only
+// reads the PNG header, ignoring trailing bytes.
+let _variant = 0;
+export const distinctPng = (): Uint8Array => {
+  const base = tinyPng();
+  const out = new Uint8Array(base.byteLength + 4);
+  out.set(base);
+  new DataView(out.buffer).setUint32(base.byteLength, ++_variant);
+  return out;
+};
+
 export const AUTH = { Authorization: 'Bearer test-api-key' };

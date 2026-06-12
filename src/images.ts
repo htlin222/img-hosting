@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { Hono } from 'hono';
 import type { Env } from './env';
 import { requireBearer } from './auth';
@@ -15,7 +16,7 @@ const OWNER = 'me';
 
 type BodyError = { error: string; status?: number };
 
-type ImageRow = {
+export type ImageRow = {
   id: string;
   deletehash: string;
   owner: string;
@@ -35,7 +36,7 @@ type ImageRow = {
 const baseUrl = (c: { env: Env; req: { url: string } }) =>
   c.env.PUBLIC_BASE_URL?.replace(/\/$/, '') || new URL(c.req.url).origin;
 
-const toImgurShape = (row: ImageRow, c: { env: Env; req: { url: string } }, includeDeleteHash: boolean) => ({
+export const toImgurShape = (row: ImageRow, c: { env: Env; req: { url: string } }, includeDeleteHash: boolean) => ({
   id: row.id,
   title: row.title,
   description: row.description,
@@ -130,21 +131,22 @@ const readBody = async (req: Request): Promise<{ bytes: Uint8Array; filename: st
   return { bytes: new Uint8Array(buf), filename: null, title: null, description: null };
 };
 
+// Standard base64 alphabet with optional `=` padding. We validate explicitly
+// because `Buffer.from(.., 'base64')` silently *drops* invalid characters, so
+// without this check garbage input would decode to junk bytes instead of a 400.
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+
 const decodeBase64 = (s: string): Uint8Array | BodyError => {
   // Strip data URL prefix if present.
   const clean = (s.includes(',') ? s.slice(s.indexOf(',') + 1) : s).replace(/\s+/g, '');
-  // Reject before allocating: atob would expand `clean` into a buffer ~3/4 its
+  // Reject before allocating: decoding expands `clean` into a buffer ~3/4 its
   // length, so an oversize string is a memory-pressure vector. Bound the input.
   if (clean.length > MAX_B64_CHARS) return { error: 'file too large', status: 413 };
-  let binary: string;
-  try {
-    binary = atob(clean);
-  } catch {
-    return { error: 'invalid base64 image' };
-  }
-  const out = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
-  return out;
+  if (!BASE64_RE.test(clean)) return { error: 'invalid base64 image' };
+  // Buffer.from is a native decode — markedly faster than a JS charCodeAt loop
+  // for multi-MB uploads. Copy into a standalone Uint8Array so downstream code
+  // isn't handed a view into Node's shared internal buffer pool.
+  return new Uint8Array(Buffer.from(clean, 'base64'));
 };
 
 export const imagesApp = new Hono<{ Bindings: Env }>();
@@ -160,9 +162,17 @@ imagesApp.post('/3/image', rateLimit('upload'), requireBearer, async (c) => {
   const sniff = sniffImage(bytes);
   if (!sniff) return fail(c, 415, 'unsupported image type');
 
+  const sha = await sha256Hex(bytes);
+
+  // Dedup on content hash (uses idx_images_sha): if identical bytes are already
+  // stored and live, return that object instead of writing a second R2 copy.
+  const existing = await c.env.IMG_DB.prepare(
+    'SELECT * FROM images WHERE sha256 = ? AND owner = ? AND deleted_at IS NULL LIMIT 1',
+  ).bind(sha, OWNER).first<ImageRow>();
+  if (existing) return ok(c, toImgurShape(existing, c, true), 200);
+
   const id = newImageId();
   const deletehash = newDeleteHash();
-  const sha = await sha256Hex(bytes);
   const now = Math.floor(Date.now() / 1000);
   const key = `img/${id}.${sniff.ext}`;
 
@@ -244,9 +254,14 @@ imagesApp.post('/3/image/:deletehash', rateLimit('write'), requireBearer, async 
   ).bind(deletehash).first<ImageRow>();
   if (!row) return fail(c, 404, 'not found');
 
-  const form = await c.req.parseBody().catch(() => ({} as Record<string, unknown>));
-  const title = typeof form['title'] === 'string' ? (form['title'] as string) : row.title;
-  const description = typeof form['description'] === 'string' ? (form['description'] as string) : row.description;
+  // Accept either form bodies or JSON. Previously a JSON body silently parsed
+  // to nothing, so the request returned success while updating nothing.
+  const contentType = c.req.header('content-type') ?? '';
+  const fields: Record<string, unknown> = contentType.includes('application/json')
+    ? await c.req.json().catch(() => ({}))
+    : await c.req.parseBody().catch(() => ({}));
+  const title = typeof fields['title'] === 'string' ? fields['title'] : row.title;
+  const description = typeof fields['description'] === 'string' ? fields['description'] : row.description;
 
   await c.env.IMG_DB.prepare(
     'UPDATE images SET title = ?, description = ? WHERE id = ?',

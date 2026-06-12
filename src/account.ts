@@ -3,43 +3,13 @@ import type { Env } from './env';
 import { requireBearer } from './auth';
 import { rateLimit } from './ratelimit';
 import { ok, fail } from './response';
+import { type ImageRow, toImgurShape } from './images';
 
 const OWNER = 'me';
 
-type ImageRow = {
-  id: string;
-  deletehash: string;
-  owner: string;
-  filename: string | null;
-  title: string | null;
-  description: string | null;
-  mime: string;
-  ext: string;
-  size: number;
-  width: number | null;
-  height: number | null;
-  sha256: string;
-  created_at: number;
-  deleted_at: number | null;
-};
-
-const baseUrl = (c: { env: Env; req: { url: string } }) =>
-  c.env.PUBLIC_BASE_URL?.replace(/\/$/, '') || new URL(c.req.url).origin;
-
-const shape = (row: ImageRow, c: { env: Env; req: { url: string } }) => ({
-  id: row.id,
-  title: row.title,
-  description: row.description,
-  datetime: row.created_at,
-  type: row.mime,
-  width: row.width,
-  height: row.height,
-  size: row.size,
-  views: 0,
-  link: `${baseUrl(c)}/i/${row.id}.${row.ext}`,
-  name: row.filename,
-  deletehash: row.deletehash,
-});
+// Account endpoints always include the deletehash (per the API contract).
+const shape = (row: ImageRow, c: { env: Env; req: { url: string } }) =>
+  toImgurShape(row, c, true);
 
 export const accountApp = new Hono<{ Bindings: Env }>();
 

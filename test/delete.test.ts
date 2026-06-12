@@ -64,4 +64,19 @@ describe('POST /3/image/:deletehash (update)', () => {
     expect(j.data.title).toBe('new title');
     expect(j.data.description).toBe('new desc');
   });
+
+  it('updates via a JSON body (previously silently no-op)', async () => {
+    const { id, deletehash } = await upload();
+    const up = await SELF.fetch(`https://example.test/3/image/${deletehash}`, {
+      method: 'POST',
+      headers: { ...AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'json title', description: 'json desc' }),
+    });
+    expect(up.status).toBe(200);
+
+    const get = await SELF.fetch(`https://example.test/3/image/${id}`);
+    const j = (await get.json()) as { data: { title: string; description: string } };
+    expect(j.data.title).toBe('json title');
+    expect(j.data.description).toBe('json desc');
+  });
 });

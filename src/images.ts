@@ -117,7 +117,7 @@ const decodeBase64 = (s: string): Uint8Array => {
 export const imagesApp = new Hono<{ Bindings: Env }>();
 
 // ----- POST /3/image -----
-imagesApp.post('/3/image', requireBearer, rateLimit('upload'), async (c) => {
+imagesApp.post('/3/image', rateLimit('upload'), requireBearer, async (c) => {
   const parsed = await readBody(c.req.raw);
   if ('error' in parsed) return fail(c, 400, parsed.error);
   const { bytes, filename, title, description } = parsed;
@@ -171,7 +171,7 @@ imagesApp.get('/3/image/:id', rateLimit('read'), async (c) => {
 });
 
 // ----- DELETE /3/image/:deletehash -----
-imagesApp.delete('/3/image/:deletehash', requireBearer, async (c) => {
+imagesApp.delete('/3/image/:deletehash', rateLimit('write'), requireBearer, async (c) => {
   const deletehash = c.req.param('deletehash');
   const row = await c.env.IMG_DB.prepare(
     'SELECT * FROM images WHERE deletehash = ? AND deleted_at IS NULL',
@@ -186,7 +186,7 @@ imagesApp.delete('/3/image/:deletehash', requireBearer, async (c) => {
 });
 
 // ----- POST /3/image/:deletehash (update title/description) -----
-imagesApp.post('/3/image/:deletehash', requireBearer, async (c) => {
+imagesApp.post('/3/image/:deletehash', rateLimit('write'), requireBearer, async (c) => {
   const deletehash = c.req.param('deletehash');
   const row = await c.env.IMG_DB.prepare(
     'SELECT * FROM images WHERE deletehash = ? AND deleted_at IS NULL',

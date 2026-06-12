@@ -5,6 +5,7 @@ import { accountApp } from './account';
 import { serveApp } from './serve';
 import { uiApp } from './ui';
 import { requireAuth } from './auth';
+import { rateLimit } from './ratelimit';
 import { ok, fail } from './response';
 import { verifyAccessJwt } from './access';
 
@@ -16,7 +17,7 @@ app.get('/healthz', (c) => c.json({ ok: true }));
 // - If a valid Access JWT is present, returns the email/sub.
 // - Else if a valid bearer is present, returns { kind: 'bearer' }.
 // - Else returns 401 so the UI can fall back to its API_KEY login form.
-app.get('/whoami', async (c) => {
+app.get('/whoami', rateLimit('read'), async (c) => {
   const team = c.env.ACCESS_TEAM;
   const aud = c.env.ACCESS_AUD;
   const jwt = c.req.header('Cf-Access-Jwt-Assertion');

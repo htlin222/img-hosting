@@ -62,7 +62,9 @@ serveApp.get('/i/:filename', rateLimit('serve'), async (c) => {
 
 // GET /raw/:filename - internal endpoint for cf.image resizing to fetch from.
 // Identical bytes to /i/ but bypasses the resize branch to avoid loops.
-serveApp.get('/raw/:filename', async (c) => {
+// It is publicly reachable, so it must carry the same rate limit as /i/ —
+// otherwise it is a free, unmetered bypass of the /i/ serve limit.
+serveApp.get('/raw/:filename', rateLimit('serve'), async (c) => {
   const filename = c.req.param('filename') ?? '';
   const dot = filename.lastIndexOf('.');
   if (dot < 1) return c.text('not found', 404);

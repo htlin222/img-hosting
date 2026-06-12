@@ -44,7 +44,7 @@ const shape = (row: ImageRow, c: { env: Env; req: { url: string } }) => ({
 export const accountApp = new Hono<{ Bindings: Env }>();
 
 // GET /3/account/me/images?page=&perPage=
-accountApp.get('/3/account/me/images', requireBearer, rateLimit('read'), async (c) => {
+accountApp.get('/3/account/me/images', rateLimit('read'), requireBearer, async (c) => {
   const page = Math.max(0, parseInt(c.req.query('page') ?? '0', 10) || 0);
   const perPage = Math.max(1, Math.min(100, parseInt(c.req.query('perPage') ?? '50', 10) || 50));
   const offset = page * perPage;
@@ -60,7 +60,7 @@ accountApp.get('/3/account/me/images', requireBearer, rateLimit('read'), async (
 });
 
 // GET /3/account/me/images/count
-accountApp.get('/3/account/me/images/count', requireBearer, async (c) => {
+accountApp.get('/3/account/me/images/count', rateLimit('read'), requireBearer, async (c) => {
   const row = await c.env.IMG_DB.prepare(
     'SELECT COUNT(*) AS n FROM images WHERE owner = ? AND deleted_at IS NULL',
   ).bind(OWNER).first<{ n: number }>();
@@ -68,7 +68,7 @@ accountApp.get('/3/account/me/images/count', requireBearer, async (c) => {
 });
 
 // GET /3/account/me/image/:id
-accountApp.get('/3/account/me/image/:id', requireBearer, async (c) => {
+accountApp.get('/3/account/me/image/:id', rateLimit('read'), requireBearer, async (c) => {
   const row = await c.env.IMG_DB.prepare(
     'SELECT * FROM images WHERE id = ? AND owner = ? AND deleted_at IS NULL',
   ).bind(c.req.param('id'), OWNER).first<ImageRow>();
